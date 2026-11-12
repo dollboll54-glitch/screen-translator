@@ -41,17 +41,30 @@ jobs:
           </resources>
           EOF
 
-          # Create sleek small bg_bubble_circle drawable
+          # Create default bg_bubble_circle drawable
           mkdir -p app/src/main/res/drawable
           cat << 'EOF' > app/src/main/res/drawable/bg_bubble_circle.xml
           <?xml version="1.0" encoding="utf-8"?>
           <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
               <solid android:color="#2563EB" />
-              <stroke android:width="1.5dp" android:color="#60A5FA" />
+              <stroke android:width="2dp" android:color="#60A5FA" />
           </shape>
           EOF
 
-          # 1. বাবলটি ছোট (38dp) এবং হালকা স্বচ্ছ (alpha 0.45) করা
+          # Fix missing icon reference in manifest
+          if [ -f "app/src/main/AndroidManifest.xml" ]; then
+            sed -i 's|android:icon="@mipmap/ic_launcher"|android:icon="@android:drawable/sym_def_app_icon"|g' app/src/main/AndroidManifest.xml
+            sed -i 's|android:roundIcon="@mipmap/ic_launcher_round"||g' app/src/main/AndroidManifest.xml
+          fi
+
+          # Ensure cardview dependency is present
+          if [ -f "app/build.gradle" ]; then
+            if ! grep -q "cardview" app/build.gradle; then
+              sed -i "s|dependencies {|dependencies {\n    implementation 'androidx.cardview:cardview:1.0.0'|g" app/build.gradle
+            fi
+          fi
+
+          # বাবলটি ছোট (৩৮dp) এবং ৪৫% হালকা ও স্বচ্ছ (alpha 0.45) করা
           cat << 'EOF' > app/src/main/res/layout/layout_floating_bubble.xml
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -72,89 +85,7 @@ jobs:
           </FrameLayout>
           EOF
 
-          # 2. অনুবাদের উইন্ডোটি কমপ্যাক্ট ও সুন্দর করা
-          cat << 'EOF' > app/src/main/res/layout/layout_translation_overlay_card.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
-              xmlns:app="http://schemas.android.com/apk/res-auto"
-              android:layout_width="match_parent"
-              android:layout_height="wrap_content"
-              android:layout_margin="12dp"
-              app:cardCornerRadius="14dp"
-              app:cardElevation="10dp"
-              app:cardBackgroundColor="#0F172A">
-              <LinearLayout
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:orientation="vertical"
-                  android:padding="12dp">
-                  <LinearLayout
-                      android:layout_width="match_parent"
-                      android:layout_height="wrap_content"
-                      android:gravity="center_vertical"
-                      android:orientation="horizontal">
-                      <TextView
-                          android:layout_width="0dp"
-                          android:layout_height="wrap_content"
-                          android:layout_weight="1"
-                          android:text="বাংলা অনুবাদ"
-                          android:textColor="#38BDF8"
-                          android:textSize="12sp"
-                          android:textStyle="bold" />
-                      <ImageView
-                          android:id="@+id/btn_speak_text"
-                          android:layout_width="24dp"
-                          android:layout_height="24dp"
-                          android:padding="3dp"
-                          android:src="@android:drawable/ic_lock_silent_mode_off"
-                          android:tint="#CBD5E1" />
-                      <ImageView
-                          android:id="@+id/btn_copy_translation"
-                          android:layout_width="24dp"
-                          android:layout_height="24dp"
-                          android:layout_marginStart="8dp"
-                          android:padding="3dp"
-                          android:src="@android:drawable/ic_menu_save"
-                          android:tint="#CBD5E1" />
-                      <ImageView
-                          android:id="@+id/btn_close_overlay"
-                          android:layout_width="24dp"
-                          android:layout_height="24dp"
-                          android:layout_marginStart="8dp"
-                          android:padding="3dp"
-                          android:src="@android:drawable/ic_menu_close_clear_cancel"
-                          android:tint="#94A3B8" />
-                  </LinearLayout>
-                  <TextView
-                      android:id="@+id/tv_original_text"
-                      android:layout_width="match_parent"
-                      android:layout_height="wrap_content"
-                      android:layout_marginTop="4dp"
-                      android:textColor="#64748B"
-                      android:textSize="11sp" />
-                  <TextView
-                      android:id="@+id/tv_translated_text"
-                      android:layout_width="match_parent"
-                      android:layout_height="wrap_content"
-                      android:layout_marginTop="4dp"
-                      android:textColor="#F8FAFC"
-                      android:textSize="15sp"
-                      android:textStyle="bold" />
-              </LinearLayout>
-          </androidx.cardview.widget.CardView>
-          EOF
-
-          # 3. সব ধরণের বিরক্তিকর পপআপ ও মেসেজ বন্ধ করা
-          sed -i 's|showToastOverlay.*|//|g' app/src/main/java/com/screentranslator/app/FloatingBubbleService.kt
-          sed -i 's|Toast.makeText.*show()|//|g' app/src/main/java/com/screentranslator/app/MainActivity.kt
-
-          # Fix icons and cardview
-          sed -i 's|android:icon="@mipmap/ic_launcher"|android:icon="@android:drawable/sym_def_app_icon"|g' app/src/main/AndroidManifest.xml
-          sed -i 's|android:roundIcon="@mipmap/ic_launcher_round"||g' app/src/main/AndroidManifest.xml
-
-          if ! grep -q "cardview" app/build.gradle; then
-            sed -i "s|dependencies {|dependencies {\n    implementation 'androidx.cardview:cardview:1.0.0'|g" app/build.gradle
-          fi
+          ls -la app/ || true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
