@@ -64,7 +64,7 @@ jobs:
             fi
           fi
 
-          # বাবলটি ছোট (৩৮dp) এবং ৪৫% হালকা ও স্বচ্ছ (alpha 0.45) করা
+          # 1. বাবল ছোট (৩৮dp) এবং ৪৫% হালকা স্বচ্ছ করা
           cat << 'EOF' > app/src/main/res/layout/layout_floating_bubble.xml
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -83,6 +83,157 @@ jobs:
                   android:elevation="4dp"
                   android:contentDescription="Translator Bubble" />
           </FrameLayout>
+          EOF
+
+          # 2. bKash ও বড় মেসেজের জন্য ডুয়াল ট্রান্সলেশন ইঞ্জিন সেট করা
+          cat << 'EOF' > app/src/main/java/com/screentranslator/app/TranslationEngine.kt
+          package com.screentranslator.app
+
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.net.URLEncoder
+          import java.util.concurrent.TimeUnit
+
+          object TranslationEngine {
+              private val client = OkHttpClient.Builder()
+                  .connectTimeout(5, TimeUnit.SECONDS)
+                  .readTimeout(8, TimeUnit.SECONDS)
+                  .build()
+
+              fun translateEnToBn(sourceText: String): String {
+                  val cleanText = sourceText.trim()
+                  if (cleanText.isEmpty()) return ""
+
+                  val googleResult = tryGoogleTranslate(cleanText)
+                  if (!googleResult.isNullOrBlank()) return googleResult
+
+                  val backupResult = tryMyMemoryTranslate(cleanText)
+                  if (!backupResult.isNullOrBlank()) return backupResult
+
+                  return "অনুবাদ সম্পন্ন করা যায়নি"
+              }
+
+              private fun tryGoogleTranslate(text: String): String? {
+                  return try {
+                      val encoded = URLEncoder.encode(text, "UTF-8")
+                      val url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=bn&dt=t&q=$encoded"
+                      val req = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0 (Linux; Android 10)").build()
+                      val res = client.newCall(req).execute()
+                      val body = res.body?.string() ?: return null
+                      if (!body.startsWith("[")) return null
+                      val jsonArray = JSONArray(body)
+                      val sentences = jsonArray.optJSONArray(0) ?: return null
+                      val sb = StringBuilder()
+                      for (i in 0 until sentences.length()) {
+                          val item = sentences.optJSONArray(i)
+                          if (item != null && item.length() > 0) {
+                              val part = item.optString(0)
+                              if (part.isNotEmpty() && part != "null") sb.append(part)
+                          }
+                      }
+                      if (sb.isNotEmpty()) sb.toString() else null
+                  } catch (e: Exception) { null }
+              }
+
+              private fun tryMyMemoryTranslate(text: String): String? {
+                  return try {
+                      val encoded = URLEncoder.encode(text, "UTF-8")
+                      val url = "https://api.mymemory.translated.net/get?q=$encoded&langpair=en|bn"
+                      val req = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").build()
+                      val res = client.newCall(req).execute()
+                      val body = res.body?.string() ?: return null
+                      val json = JSONObject(body)
+                      val resData = json.optJSONObject("responseData")
+                      val translated = resData?.optString("translatedText")
+                      if (!translated.isNullOrBlank() && !translated.startsWith("MYMEMORY WARNING")) translated else null
+                  } catch (e: Exception) { null }
+              }
+          }
+          EOF
+
+          # 3. স্পিকারে মিষ্টি বাংলায় পড়ে শোনানো সেট করা
+          cat << 'EOF' > app/src/main/java/com/screentranslator/app/OverlayResultWindow.kt
+          package com.screentranslator.app
+
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.content.Context
+          import android.graphics.PixelFormat
+          import android.os.Build
+          import android.speech.tts.TextToSpeech
+          import android.view.Gravity
+          import android.view.LayoutInflater
+          import android.view.View
+          import android.view.WindowManager
+          import android.widget.ImageView
+          import android.widget.TextView
+          import android.widget.Toast
+          import java.util.Locale
+
+          object OverlayResultWindow {
+              private var popupView: View? = null
+              private var windowManager: WindowManager? = null
+              private var tts: TextToSpeech? = null
+
+              fun show(context: Context, wm: WindowManager, originalText: String, translatedText: String, targetX: Int, targetY: Int) {
+                  dismiss()
+                  this.windowManager = wm
+                  val inflater = LayoutInflater.from(context)
+                  popupView = inflater.inflate(R.layout.layout_translation_overlay_card, null)
+
+                  val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
+                  val params = WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.MATCH_PARENT,
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      layoutFlag,
+                      WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                      y = Math.max(100, targetY - 120)
+                  }
+
+                  popupView?.findViewById<TextView>(R.id.tv_original_text)?.text = originalText
+                  popupView?.findViewById<TextView>(R.id.tv_translated_text)?.text = translatedText
+
+                  popupView?.findViewById<ImageView>(R.id.btn_close_overlay)?.setOnClickListener { dismiss() }
+
+                  popupView?.findViewById<ImageView>(R.id.btn_copy_translation)?.setOnClickListener {
+                      val clip = ClipData.newPlainText("Translation", translatedText)
+                      (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+                      Toast.makeText(context, "কপি করা হয়েছে!", Toast.LENGTH_SHORT).show()
+                  }
+
+                  popupView?.findViewById<ImageView>(R.id.btn_speak_text)?.setOnClickListener {
+                      val textToSpeak = if (!translatedText.isNullOrBlank() && !translatedText.contains("সমস্যা")) translatedText else originalText
+                      if (tts == null) {
+                          tts = TextToSpeech(context) { status ->
+                              if (status == TextToSpeech.SUCCESS) {
+                                  val r = tts?.setLanguage(Locale("bn", "BD"))
+                                  if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) tts?.language = Locale("bn")
+                                  tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "tts_bn")
+                              }
+                          }
+                      } else {
+                          val r = tts?.setLanguage(Locale("bn", "BD"))
+                          if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) tts?.language = Locale("bn")
+                          tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "tts_bn")
+                      }
+                  }
+
+                  wm.addView(popupView, params)
+              }
+
+              fun dismiss() {
+                  try {
+                      popupView?.let { windowManager?.removeView(it); popupView = null }
+                      tts?.shutdown()
+                      tts = null
+                  } catch (e: Exception) {}
+              }
+          }
           EOF
 
           ls -la app/ || true
