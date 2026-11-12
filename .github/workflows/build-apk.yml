@@ -41,6 +41,29 @@ jobs:
           </resources>
           EOF
 
+          # Create default bg_bubble_circle drawable
+          mkdir -p app/src/main/res/drawable
+          cat << 'EOF' > app/src/main/res/drawable/bg_bubble_circle.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+              <solid android:color="#2563EB" />
+              <stroke android:width="2dp" android:color="#60A5FA" />
+          </shape>
+          EOF
+
+          # Fix missing icon reference in manifest
+          if [ -f "app/src/main/AndroidManifest.xml" ]; then
+            sed -i 's|android:icon="@mipmap/ic_launcher"|android:icon="@android:drawable/sym_def_app_icon"|g' app/src/main/AndroidManifest.xml
+            sed -i 's|android:roundIcon="@mipmap/ic_launcher_round"||g' app/src/main/AndroidManifest.xml
+          fi
+
+          # Ensure cardview dependency is present
+          if [ -f "app/build.gradle" ]; then
+            if ! grep -q "cardview" app/build.gradle; then
+              sed -i "s|dependencies {|dependencies {\n    implementation 'androidx.cardview:cardview:1.0.0'|g" app/build.gradle
+            fi
+          fi
+
           ls -la app/ || true
 
       - name: Set up JDK 17
